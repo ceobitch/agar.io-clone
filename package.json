@@ -1,13 +1,13 @@
 {
   "name": "agar.io-clone",
   "version": "1.0.0",
-  "description": "Agar.io clone with Solana integration",
-  "main": "src/server/server.js",
+  "description": "A simple Agar.io clone",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node src/server/server.js",
-    "dev": "nodemon src/server/server.js",
-    "build": "npm install",
-    "vercel-build": "npm run build"
+    "build": "gulp build",
+    "start": "gulp run",
+    "watch": "gulp watch",
+    "test": "gulp test"
   },
   "repository": {
     "type": "git",
@@ -42,11 +42,10 @@
     "@babel/core": "^7.21.8",
     "@babel/eslint-parser": "^7.21.8",
     "@babel/preset-env": "^7.21.5",
-    "@solana/wallet-adapter-base": "^0.9.23",
-    "@solana/wallet-adapter-react": "^0.15.35",
-    "@solana/wallet-adapter-react-ui": "^0.9.34",
-    "@solana/wallet-adapter-wallets": "^0.19.25",
-    "@solana/web3.js": "^1.87.6",
+    "@solana/wallet-adapter-react": "^0.15.38",
+    "@solana/wallet-adapter-react-ui": "^0.9.38",
+    "@solana/wallet-adapter-wallets": "^0.19.36",
+    "@solana/web3.js": "^1.98.2",
     "assert": "^2.1.0",
     "babel-loader": "^9.1.2",
     "buffer": "^6.0.3",
@@ -64,18 +63,18 @@
     "https-browserify": "^1.0.0",
     "jshint": "^2.13.6",
     "mocha": "^10.2.0",
-    "nodemon": "^3.0.2",
+    "nodemon": "^3.0.1",
     "os-browserify": "^0.3.0",
     "process": "^0.11.10",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "sat": "^0.7.0",
-    "socket.io": "^4.7.2",
-    "socket.io-client": "^4.7.2",
+    "sat": "^0.9.0",
+    "socket.io": "^4.6.1",
+    "socket.io-client": "^4.6.1",
     "sqlite3": "^5.1.6",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
-    "sweetalert2": "^11.10.1",
+    "sweetalert2": "^11.22.0",
     "url": "^0.11.4",
     "uuid": "^9.0.0",
     "webpack": "^5.82.1",
@@ -87,8 +86,5 @@
     "css-loader": "^7.1.2",
     "plugin-error": "^2.0.1",
     "style-loader": "^4.0.0"
-  },
-  "engines": {
-    "node": ">=14.0.0"
   }
 }

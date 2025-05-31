@@ -18,7 +18,6 @@ const io = require('socket.io')(http, {
 });
 const SAT = require('sat');
 const solana = require('./solana');
-const path = require('path');
 
 const gameLogic = require('./game-logic');
 const loggingRepositry = require('./repositories/logging-repository');
@@ -41,8 +40,7 @@ let leaderboardChanged = false;
 
 const Vector = SAT.Vector;
 
-// Serve static files from the client directory
-app.use(express.static(path.join(__dirname, '../client')));
+app.use(express.static(__dirname + '/../client'));
 
 io.on('connection', function (socket) {
     let type = socket.handshake.query.type;
@@ -399,16 +397,10 @@ setInterval(tickGame, 1000 / 60);
 setInterval(gameloop, 1000);
 setInterval(sendUpdates, 1000 / config.networkUpdateFactor);
 
-// Export the Express app for Vercel
-module.exports = app;
-
-// Only start the server if we're not in a serverless environment
-if (process.env.NODE_ENV !== 'production') {
-    const port = process.env.PORT || 3001;
-    http.listen(port, () => {
-        console.log(`Server running on port ${port}`);
-    });
-}
+// Don't touch, IP configurations.
+var ipaddress = process.env.OPENSHIFT_NODEJS_IP || process.env.IP || config.host;
+var serverport = process.env.OPENSHIFT_NODEJS_PORT || process.env.PORT || config.port;
+http.listen(serverport, ipaddress, () => console.log('[DEBUG] Listening on ' + ipaddress + ':' + serverport));
 
 // Add API endpoint for game wallet
 app.get('/api/game-wallet', (req, res) => {
