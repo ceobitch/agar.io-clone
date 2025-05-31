@@ -13,22 +13,22 @@ const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 // Get game wallet private key from environment variable
 const GAME_WALLET_PRIVATE_KEY = process.env.GAME_WALLET_PRIVATE_KEY;
 
-if (!GAME_WALLET_PRIVATE_KEY) {
-    console.error('ERROR: GAME_WALLET_PRIVATE_KEY environment variable is not set!');
-    process.exit(1);
-}
-
 // Initialize game wallet
 let gameWallet;
-try {
-    gameWallet = Keypair.fromSecretKey(bs58.decode(GAME_WALLET_PRIVATE_KEY));
-} catch (error) {
-    console.error('ERROR: Invalid game wallet private key format!');
-    process.exit(1);
-}
+let GAME_WALLET_PUBLIC_KEY = '';
 
-// Export the public key for client use
-const GAME_WALLET_PUBLIC_KEY = gameWallet.publicKey.toString();
+if (GAME_WALLET_PRIVATE_KEY) {
+    try {
+        gameWallet = Keypair.fromSecretKey(bs58.decode(GAME_WALLET_PRIVATE_KEY));
+        GAME_WALLET_PUBLIC_KEY = gameWallet.publicKey.toString();
+        console.log('Game wallet initialized successfully');
+    } catch (error) {
+        console.error('ERROR: Invalid game wallet private key format!');
+        // Don't exit process, just log error
+    }
+} else {
+    console.warn('WARNING: GAME_WALLET_PRIVATE_KEY not set. Solana features will be disabled.');
+}
 
 // Calculate reward based on mass eaten
 function calculateReward(eatenMass) {
@@ -40,6 +40,11 @@ function calculateReward(eatenMass) {
 
 // Send reward to player
 async function sendReward(playerWallet, amount) {
+    if (!gameWallet) {
+        console.error('Cannot send reward: Game wallet not initialized');
+        return false;
+    }
+
     try {
         const transaction = new Transaction().add(
             SystemProgram.transfer({
