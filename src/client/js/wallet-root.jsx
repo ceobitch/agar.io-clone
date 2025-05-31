@@ -9,12 +9,8 @@ import Swal from 'sweetalert2';
 
 // Support both Phantom and Solflare
 const wallets = [
-    new PhantomWalletAdapter({
-        network: 'devnet'
-    }),
-    new SolflareWalletAdapter({
-        network: 'devnet'
-    })
+    new PhantomWalletAdapter(),
+    new SolflareWalletAdapter()
 ];
 
 const endpoint = clusterApiUrl('devnet');
@@ -95,13 +91,10 @@ function FeeDisclaimer() {
 
 function CashOutButton({ mass, onCashOut }) {
     const [timeLeft, setTimeLeft] = useState(60);
-    const [earnings, setEarnings] = useState(ENTRY_FEE * 0.9); // Start with entry fee minus 10% fee
+    const [earnings, setEarnings] = useState(ENTRY_FEE * 0.9);
 
-    // Calculate earnings based on mass gained
     useEffect(() => {
-        // Base earnings is entry fee minus initial fee
         const baseEarnings = ENTRY_FEE * 0.9;
-        // Additional earnings from mass: 1 mass = 0.00001 SOL
         const massEarnings = (mass * 0.00001).toFixed(4);
         const totalEarnings = (parseFloat(massEarnings) + baseEarnings).toFixed(4);
         setEarnings(totalEarnings);
@@ -112,7 +105,6 @@ function CashOutButton({ mass, onCashOut }) {
             try {
                 const result = await onCashOut();
                 if (result && result.signature) {
-                    // Show success alert with transaction link
                     await Swal.fire({
                         title: 'Cash Out Successful!',
                         html: `
@@ -130,8 +122,6 @@ function CashOutButton({ mass, onCashOut }) {
                         confirmButtonText: 'Return to Home',
                         confirmButtonColor: '#4CAF50'
                     });
-                    
-                    // Redirect to home page
                     window.location.href = '/';
                 }
             } catch (error) {
@@ -221,12 +211,10 @@ function GameStarter() {
     const [showFeeDisclaimer, setShowFeeDisclaimer] = useState(true);
     const [hasPaidEntryFee, setHasPaidEntryFee] = useState(false);
 
-    // Get game wallet on component mount
     useEffect(() => {
         getGameWallet();
     }, []);
 
-    // Listen for mass updates
     useEffect(() => {
         if (window.socket) {
             window.socket.on('massUpdate', (mass) => {
@@ -235,7 +223,6 @@ function GameStarter() {
         }
     }, []);
 
-    // Log wallet changes
     useEffect(() => {
         if (wallet) {
             logToTerminal(`Wallet selected: ${wallet.adapter.name}`);
@@ -248,54 +235,22 @@ function GameStarter() {
         try {
             setIsLoading(true);
             logToTerminal('Processing cash out...');
-            
-            // Calculate prize amount (90% of total earnings)
-            const prizeAmount = parseFloat(earnings) * 0.9;
-            
-            // Convert to lamports (multiply by 1e9 and round to integer)
-            const lamports = Math.round(prizeAmount * 1e9);
-            
-            // Create transaction for prize
+
             const transaction = new Transaction().add(
                 SystemProgram.transfer({
                     fromPubkey: GAME_WALLET,
                     toPubkey: publicKey,
-                    lamports: lamports
+                    lamports: LAMPORTS_PER_SOL * ENTRY_FEE * 0.9
                 })
             );
 
-            // Get recent blockhash
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = GAME_WALLET;
-
-            // Send transaction
             const signature = await sendTransaction(transaction, connection);
+            await connection.confirmTransaction(signature, 'confirmed');
             
-            // Wait for confirmation
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-            
-            if (confirmation.value.err) {
-                throw new Error('Transaction failed to confirm');
-            }
-            
-            // Emit cash out event to server
-            if (window.socket) {
-                window.socket.emit('cashOut', {
-                    wallet: publicKey.toString(),
-                    mass: playerMass,
-                    prizeAmount: prizeAmount,
-                    signature: signature
-                });
-            }
-            
-            setHasPaidEntryFee(false);
-            logToTerminal(`Cash out request sent for ${prizeAmount} SOL (10% fee applied)`);
-            
+            logToTerminal(`Cash out successful: ${signature}`);
             return { signature };
         } catch (err) {
             console.error('Cash out failed:', err);
-            setError('Failed to cash out. Please try again.');
             logToTerminal(`ERROR: Cash out failed - ${err.message}`);
             throw err;
         } finally {
@@ -304,52 +259,32 @@ function GameStarter() {
     };
 
     const handleStartGame = async () => {
-        if (!connected || !publicKey || !GAME_WALLET) return;
-        
+        if (!connected || !publicKey || !GAME_WALLET) {
+            setError('Please connect your wallet first');
+            return;
+        }
+
         try {
             setIsLoading(true);
             setError(null);
-            logToTerminal(`Attempting to pay entry fee from ${publicKey.toString()}`);
+            logToTerminal('Processing entry fee...');
 
-            // Create transaction for entry fee
             const transaction = new Transaction().add(
                 SystemProgram.transfer({
                     fromPubkey: publicKey,
                     toPubkey: GAME_WALLET,
-                    lamports: ENTRY_FEE * LAMPORTS_PER_SOL
+                    lamports: LAMPORTS_PER_SOL * ENTRY_FEE
                 })
             );
 
-            // Get recent blockhash
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = publicKey;
-
-            // Send transaction
-            logToTerminal('Sending transaction...');
             const signature = await sendTransaction(transaction, connection);
-            logToTerminal(`Transaction sent: ${signature}`);
-
-            // Wait for confirmation with timeout
-            logToTerminal('Waiting for confirmation...');
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-
-            if (confirmation.value.err) {
-                throw new Error('Transaction failed to confirm');
-            }
-
-            setHasPaidEntryFee(true);
-            logToTerminal('Transaction confirmed! Starting game...');
-
-            // Start game with wallet address as name
-            const pk = publicKey.toString();
-            const abbrev = pk.slice(0, 4) + '…' + pk.slice(-4);
+            await connection.confirmTransaction(signature, 'confirmed');
             
-            // Use global function if available, otherwise use window
-            const startGameFn = window.startGame || global.startGame;
-            if (typeof startGameFn === 'function') {
-                startGameFn('player', abbrev, pk);
-                logToTerminal(`Game started for player: ${abbrev}`);
+            logToTerminal(`Entry fee paid: ${signature}`);
+            setHasPaidEntryFee(true);
+
+            if (typeof window.startGame === 'function') {
+                window.startGame('player', publicKey.toString().slice(0, 4), publicKey.toString());
             } else {
                 console.error('startGame function not found');
                 setError('Failed to start game. Please refresh the page.');
@@ -365,7 +300,6 @@ function GameStarter() {
     };
 
     useEffect(() => {
-        // Only attempt connection once when wallet is selected and hasn't paid
         if (connected && publicKey && !isLoading && !error && !hasAttemptedConnection && !hasPaidEntryFee) {
             setHasAttemptedConnection(true);
             logToTerminal(`Wallet connected: ${publicKey.toString()}`);
@@ -398,12 +332,9 @@ function WalletUI() {
     );
 }
 
-// Wait for DOM to be ready
-document.addEventListener('DOMContentLoaded', () => {
-    const container = document.getElementById('wallet-root');
-    if (container) {
-        const root = createRoot(container);
-        root.render(<WalletUI />);
-        logToTerminal('Wallet UI initialized');
-    }
-});
+// Initialize React root
+const container = document.getElementById('wallet-root');
+if (container) {
+    const root = createRoot(container);
+    root.render(<WalletUI />);
+}

@@ -27,9 +27,11 @@ function runServer(done) {
 }
 
 function buildServer() {
-    let task = gulp.src(['src/server/**/*.*', 'src/server/**/*.js']);
+    let task = gulp.src(['src/server/**/*.*', 'src/server/**/*.js', '!src/server/db/**/*.sqlite3']);
     if (!process.env.IS_DEV) {
-        task = task.pipe(babel())
+        task = task.pipe(babel({
+            presets: ['@babel/preset-env']
+        }))
     }
     return task.pipe(gulp.dest('bin/server/'));
 }
@@ -62,7 +64,7 @@ function mocha(done) {
 }
 
 gulp.task('lint', () => {
-    return gulp.src(['**/*.js', '!node_modules/**/*.js', '!bin/**/*.js'])
+    return gulp.src(['**/*.js', '!node_modules/**/*.js', '!bin/**/*.js', '!src/server/db/**/*.sqlite3'])
         .pipe(eslint())
         .pipe(eslint.format())
         .pipe(eslint.failAfterError())
@@ -71,7 +73,7 @@ gulp.task('lint', () => {
 gulp.task('test', gulp.series('lint', mocha));
 
 gulp.task('todo', gulp.series('lint', () => {
-    return gulp.src('src/**/*.js')
+    return gulp.src('src/**/*.js', '!src/server/db/**/*.sqlite3')
         .pipe(todo())
         .pipe(gulp.dest('./'));
 }));
