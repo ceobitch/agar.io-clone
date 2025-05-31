@@ -19,6 +19,7 @@ const io = require('socket.io')(http, {
 const SAT = require('sat');
 const solana = require('./solana');
 const path = require('path');
+const { PublicKey } = require('@solana/web3.js');
 
 const gameLogic = require('./game-logic');
 const loggingRepositry = require('./repositories/logging-repository');
@@ -276,19 +277,36 @@ const addPlayer = (socket) => {
         } else {
             // Enforce entry fee payment
             currentPlayer.walletAddress = clientPlayerData.walletAddress;
+            console.log('[INFO] Wallet address received:', currentPlayer.walletAddress); // Debug log
+
             if (!currentPlayer.walletAddress) {
+                console.log('[ERROR] No wallet address provided');
                 socket.emit('kick', 'Wallet address required.');
                 socket.disconnect();
                 return;
             }
+
+            // Validate wallet address format
+            try {
+                new PublicKey(currentPlayer.walletAddress);
+            } catch (err) {
+                console.log('[ERROR] Invalid wallet address format:', err.message);
+                socket.emit('kick', 'Invalid wallet address format.');
+                socket.disconnect();
+                return;
+            }
+
             const paid = await hasPaidEntryFee(currentPlayer.walletAddress);
             if (!paid) {
+                console.log('[ERROR] Entry fee not paid for wallet:', currentPlayer.walletAddress);
                 socket.emit('kick', 'Entry fee not paid.');
                 socket.disconnect();
                 return;
             }
+
             // Store wallet address and add to active players
             gameRules.addPlayer(currentPlayer.walletAddress);
+            console.log('[INFO] Player added with wallet:', currentPlayer.walletAddress);
 
             const sanitizedName = clientPlayerData.name.replace(/(<([^>]+)>)/ig, '');
             clientPlayerData.name = sanitizedName;

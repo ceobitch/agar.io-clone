@@ -25,7 +25,10 @@ async function connectWallet() {
             // Force the popup even if the site was previously connected.
             const resp = await window.solana.connect({ onlyIfTrusted: false });
             if (resp && resp.publicKey) {
-                return resp.publicKey.toString();
+                // Store the full public key
+                const fullPubKey = resp.publicKey.toString();
+                console.log('Connected wallet:', fullPubKey); // Debug log
+                return fullPubKey;
             }
         }
 
@@ -114,7 +117,9 @@ function updateSolBalanceUI(balance) {
 function startGame(type, name, walletAddress) {
     if (type === 'player') {
         global.playerName = name;
+        // Store the full wallet address
         global.walletAddress = walletAddress;
+        console.log('Starting game with wallet:', walletAddress); // Debug log
     }
     global.playerType = type;
 
@@ -168,14 +173,15 @@ window.onload = function () {
             try {
                 const resp = await window.solana.connect({ onlyIfTrusted: false });
                 if (resp && resp.publicKey) {
-                    const pubKey = resp.publicKey.toString();
-                    const name = abbreviateAddress(pubKey);
+                    const fullPubKey = resp.publicKey.toString();
+                    console.log('Connected wallet:', fullPubKey); // Debug log
+                    const name = abbreviateAddress(fullPubKey);
                     // Only allow start if entry fee confirmed
                     if (!solBalanceReady) {
                         alert('Waiting for entry fee confirmation...');
                         return;
                     }
-                    startGame('player', name, pubKey);
+                    startGame('player', name, fullPubKey); // Pass the full public key
                 }
             } catch (err) {
                 console.error('Wallet connection failed:', err);
