@@ -10,7 +10,8 @@
         "includeFiles": [
           "public/**",
           "config.js"
-        ]
+        ],
+        "maxLambdaSize": "50mb"
       }
     }
   ],

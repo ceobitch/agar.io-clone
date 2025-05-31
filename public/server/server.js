@@ -46,6 +46,148 @@ const Vector = SAT.Vector;
 app.use(express.static(path.join(__dirname, '../../public')));
 app.use(express.static(path.join(__dirname, '../client')));
 
+// Game functions
+function generateSpawnpoint() {
+  let radius = util.massToRadius(config.defaultPlayerMass);
+  return getPosition(config.newPlayerInitialPosition === 'farthest', radius, map.players.data);
+}
+function tickPlayer(currentPlayer) {
+  // Remove inactivity check - players stay in game
+  currentPlayer.move(config.slowBase, config.gameWidth, config.gameHeight, INIT_MASS_LOG);
+  const isEntityInsideCircle = (point, circle) => {
+    return SAT.pointInCircle(new Vector(point.x, point.y), circle);
+  };
+  const canEatMass = (cell, cellCircle, cellIndex, mass) => {
+    if (isEntityInsideCircle(mass, cellCircle)) {
+      if (mass.id === currentPlayer.id && mass.speed > 0 && cellIndex === mass.num) return false;
+      if (cell.mass > mass.mass * 1.1) return true;
+    }
+    return false;
+  };
+  const canEatVirus = (cell, cellCircle, virus) => {
+    return virus.mass < cell.mass && isEntityInsideCircle(virus, cellCircle);
+  };
+  const cellsToSplit = [];
+  for (let cellIndex = 0; cellIndex < currentPlayer.cells.length; cellIndex++) {
+    const currentCell = currentPlayer.cells[cellIndex];
+    const cellCircle = currentCell.toCircle();
+    const eatenFoodIndexes = util.getIndexes(map.food.data, food => isEntityInsideCircle(food, cellCircle));
+    const eatenMassIndexes = util.getIndexes(map.massFood.data, mass => canEatMass(currentCell, cellCircle, cellIndex, mass));
+    const eatenVirusIndexes = util.getIndexes(map.viruses.data, virus => canEatVirus(currentCell, cellCircle, virus));
+    if (eatenVirusIndexes.length > 0) {
+      cellsToSplit.push(cellIndex);
+      map.viruses.delete(eatenVirusIndexes);
+    }
+    let massGained = eatenMassIndexes.reduce((acc, index) => acc + map.massFood.data[index].mass, 0);
+    map.food.delete(eatenFoodIndexes);
+    map.massFood.remove(eatenMassIndexes);
+    massGained += eatenFoodIndexes.length * config.foodMass;
+    currentPlayer.changeCellMass(cellIndex, massGained);
+  }
+  currentPlayer.virusSplit(cellsToSplit, config.limitSplit, config.defaultPlayerMass);
+}
+function tickGame() {
+  map.players.data.forEach(tickPlayer);
+  map.massFood.move(config.gameWidth, config.gameHeight);
+  map.players.handleCollisions(async function (gotEaten, eater) {
+    const cellGotEaten = map.players.getCell(gotEaten.playerIndex, gotEaten.cellIndex);
+    const eaterPlayer = map.players.data[eater.playerIndex];
+    const eatenPlayer = map.players.data[gotEaten.playerIndex];
+
+    // Update last hit by
+    if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
+      gameRules.updateLastHitBy(eatenPlayer.walletAddress, eaterPlayer.walletAddress);
+    }
+
+    // Calculate and send reward
+    if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
+      const {
+        transaction,
+        reward,
+        fee
+      } = gameRules.createRewardTransaction(eatenPlayer.walletAddress, eaterPlayer.walletAddress, gameRules.ENTRY_FEE);
+      io.emit('rewardEarned', {
+        player: eaterPlayer.name,
+        amount: reward,
+        fee: fee,
+        eatenPlayer: eatenPlayer.name
+      });
+    }
+    eaterPlayer.changeCellMass(eater.cellIndex, cellGotEaten.mass);
+    const playerDied = map.players.removeCell(gotEaten.playerIndex, gotEaten.cellIndex);
+    if (playerDied) {
+      if (eatenPlayer.walletAddress) {
+        gameRules.removePlayer(eatenPlayer.walletAddress);
+      }
+      io.emit('playerDied', {
+        name: eatenPlayer.name
+      });
+      sockets[eatenPlayer.id].emit('RIP');
+      map.players.removePlayerByIndex(gotEaten.playerIndex);
+    }
+  });
+}
+function calculateLeaderboard() {
+  const topPlayers = map.players.getTopPlayers();
+
+  // Add wallet address and valuation to each player
+  const enrichedPlayers = topPlayers.map(player => ({
+    ...player,
+    walletAddress: player.walletAddress || '',
+    valuation: player.massTotal * gameRules.ENTRY_FEE / config.defaultPlayerMass // Calculate valuation based on mass
+  }));
+  if (leaderboard.length !== enrichedPlayers.length) {
+    leaderboard = enrichedPlayers;
+    leaderboardChanged = true;
+  } else {
+    for (let i = 0; i < leaderboard.length; i++) {
+      if (leaderboard[i].id !== enrichedPlayers[i].id) {
+        leaderboard = enrichedPlayers;
+        leaderboardChanged = true;
+        break;
+      }
+    }
+  }
+}
+function gameloop() {
+  if (map.players.data.length > 0) {
+    calculateLeaderboard();
+    map.players.shrinkCells(config.massLossRate, config.defaultPlayerMass, config.minMassLoss);
+  }
+  map.balanceMass(config.foodMass, config.gameMass, config.maxFood, config.maxVirus);
+}
+function sendLeaderboard(socket) {
+  socket.emit('leaderboard', {
+    players: map.players.data.length,
+    leaderboard
+  });
+}
+function updateSpectator(socketID) {
+  let playerData = {
+    x: config.gameWidth / 2,
+    y: config.gameHeight / 2,
+    cells: [],
+    massTotal: 0,
+    hue: 100,
+    id: socketID,
+    name: ''
+  };
+  sockets[socketID].emit('serverTellPlayerMove', playerData, map.players.data, map.food.data, map.massFood.data, map.viruses.data);
+  if (leaderboardChanged) {
+    sendLeaderboard(sockets[socketID]);
+  }
+}
+function sendUpdates() {
+  spectators.forEach(updateSpectator);
+  map.enumerateWhatPlayersSee(function (playerData, visiblePlayers, visibleFood, visibleMass, visibleViruses) {
+    sockets[playerData.id].emit('serverTellPlayerMove', playerData, visiblePlayers, visibleFood, visibleMass, visibleViruses);
+    if (leaderboardChanged) {
+      sendLeaderboard(sockets[playerData.id]);
+    }
+  });
+  leaderboardChanged = false;
+}
+
 // Initialize game loops
 setInterval(tickGame, 1000 / 60);
 setInterval(gameloop, 1000);
@@ -66,10 +208,6 @@ io.on('connection', function (socket) {
       console.log('Unknown user type, not doing anything.');
   }
 });
-function generateSpawnpoint() {
-  let radius = util.massToRadius(config.defaultPlayerMass);
-  return getPosition(config.newPlayerInitialPosition === 'farthest', radius, map.players.data);
-}
 const addPlayer = socket => {
   var currentPlayer = new mapUtils.playerUtils.Player(socket.id);
   socket.on('gotit', function (clientPlayerData) {
@@ -221,142 +359,6 @@ const addSpectator = socket => {
     width: config.gameWidth,
     height: config.gameHeight
   });
-};
-const tickPlayer = currentPlayer => {
-  // Remove inactivity check - players stay in game
-  currentPlayer.move(config.slowBase, config.gameWidth, config.gameHeight, INIT_MASS_LOG);
-  const isEntityInsideCircle = (point, circle) => {
-    return SAT.pointInCircle(new Vector(point.x, point.y), circle);
-  };
-  const canEatMass = (cell, cellCircle, cellIndex, mass) => {
-    if (isEntityInsideCircle(mass, cellCircle)) {
-      if (mass.id === currentPlayer.id && mass.speed > 0 && cellIndex === mass.num) return false;
-      if (cell.mass > mass.mass * 1.1) return true;
-    }
-    return false;
-  };
-  const canEatVirus = (cell, cellCircle, virus) => {
-    return virus.mass < cell.mass && isEntityInsideCircle(virus, cellCircle);
-  };
-  const cellsToSplit = [];
-  for (let cellIndex = 0; cellIndex < currentPlayer.cells.length; cellIndex++) {
-    const currentCell = currentPlayer.cells[cellIndex];
-    const cellCircle = currentCell.toCircle();
-    const eatenFoodIndexes = util.getIndexes(map.food.data, food => isEntityInsideCircle(food, cellCircle));
-    const eatenMassIndexes = util.getIndexes(map.massFood.data, mass => canEatMass(currentCell, cellCircle, cellIndex, mass));
-    const eatenVirusIndexes = util.getIndexes(map.viruses.data, virus => canEatVirus(currentCell, cellCircle, virus));
-    if (eatenVirusIndexes.length > 0) {
-      cellsToSplit.push(cellIndex);
-      map.viruses.delete(eatenVirusIndexes);
-    }
-    let massGained = eatenMassIndexes.reduce((acc, index) => acc + map.massFood.data[index].mass, 0);
-    map.food.delete(eatenFoodIndexes);
-    map.massFood.remove(eatenMassIndexes);
-    massGained += eatenFoodIndexes.length * config.foodMass;
-    currentPlayer.changeCellMass(cellIndex, massGained);
-  }
-  currentPlayer.virusSplit(cellsToSplit, config.limitSplit, config.defaultPlayerMass);
-};
-const tickGame = () => {
-  map.players.data.forEach(tickPlayer);
-  map.massFood.move(config.gameWidth, config.gameHeight);
-  map.players.handleCollisions(async function (gotEaten, eater) {
-    const cellGotEaten = map.players.getCell(gotEaten.playerIndex, gotEaten.cellIndex);
-    const eaterPlayer = map.players.data[eater.playerIndex];
-    const eatenPlayer = map.players.data[gotEaten.playerIndex];
-
-    // Update last hit by
-    if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
-      gameRules.updateLastHitBy(eatenPlayer.walletAddress, eaterPlayer.walletAddress);
-    }
-
-    // Calculate and send reward
-    if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
-      const {
-        transaction,
-        reward,
-        fee
-      } = gameRules.createRewardTransaction(eatenPlayer.walletAddress, eaterPlayer.walletAddress, gameRules.ENTRY_FEE);
-      io.emit('rewardEarned', {
-        player: eaterPlayer.name,
-        amount: reward,
-        fee: fee,
-        eatenPlayer: eatenPlayer.name
-      });
-    }
-    eaterPlayer.changeCellMass(eater.cellIndex, cellGotEaten.mass);
-    const playerDied = map.players.removeCell(gotEaten.playerIndex, gotEaten.cellIndex);
-    if (playerDied) {
-      if (eatenPlayer.walletAddress) {
-        gameRules.removePlayer(eatenPlayer.walletAddress);
-      }
-      io.emit('playerDied', {
-        name: eatenPlayer.name
-      });
-      sockets[eatenPlayer.id].emit('RIP');
-      map.players.removePlayerByIndex(gotEaten.playerIndex);
-    }
-  });
-};
-const calculateLeaderboard = () => {
-  const topPlayers = map.players.getTopPlayers();
-
-  // Add wallet address and valuation to each player
-  const enrichedPlayers = topPlayers.map(player => ({
-    ...player,
-    walletAddress: player.walletAddress || '',
-    valuation: player.massTotal * gameRules.ENTRY_FEE / config.defaultPlayerMass // Calculate valuation based on mass
-  }));
-  if (leaderboard.length !== enrichedPlayers.length) {
-    leaderboard = enrichedPlayers;
-    leaderboardChanged = true;
-  } else {
-    for (let i = 0; i < leaderboard.length; i++) {
-      if (leaderboard[i].id !== enrichedPlayers[i].id) {
-        leaderboard = enrichedPlayers;
-        leaderboardChanged = true;
-        break;
-      }
-    }
-  }
-};
-const gameloop = () => {
-  if (map.players.data.length > 0) {
-    calculateLeaderboard();
-    map.players.shrinkCells(config.massLossRate, config.defaultPlayerMass, config.minMassLoss);
-  }
-  map.balanceMass(config.foodMass, config.gameMass, config.maxFood, config.maxVirus);
-};
-const sendUpdates = () => {
-  spectators.forEach(updateSpectator);
-  map.enumerateWhatPlayersSee(function (playerData, visiblePlayers, visibleFood, visibleMass, visibleViruses) {
-    sockets[playerData.id].emit('serverTellPlayerMove', playerData, visiblePlayers, visibleFood, visibleMass, visibleViruses);
-    if (leaderboardChanged) {
-      sendLeaderboard(sockets[playerData.id]);
-    }
-  });
-  leaderboardChanged = false;
-};
-const sendLeaderboard = socket => {
-  socket.emit('leaderboard', {
-    players: map.players.data.length,
-    leaderboard
-  });
-};
-const updateSpectator = socketID => {
-  let playerData = {
-    x: config.gameWidth / 2,
-    y: config.gameHeight / 2,
-    cells: [],
-    massTotal: 0,
-    hue: 100,
-    id: socketID,
-    name: ''
-  };
-  sockets[socketID].emit('serverTellPlayerMove', playerData, map.players.data, map.food.data, map.massFood.data, map.viruses.data);
-  if (leaderboardChanged) {
-    sendLeaderboard(sockets[socketID]);
-  }
 };
 
 // API endpoints
