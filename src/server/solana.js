@@ -2,8 +2,13 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Key
 const bs58 = require('bs58');
 require('dotenv').config();
 
-// Initialize Solana connection to devnet
-const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+// Use environment variable to select devnet or mainnet
+const isDevnet = process.env.SOLANA_DEVNET === 'true';
+const SOLANA_RPC_URL = isDevnet
+  ? 'https://api.devnet.solana.com'
+  : 'https://api.mainnet-beta.solana.com';
+
+const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 // Get game wallet private key from environment variable
 const GAME_WALLET_PRIVATE_KEY = process.env.GAME_WALLET_PRIVATE_KEY;
