@@ -97,6 +97,21 @@ function CashOutButton({ mass, onCashOut }) {
     const [timeLeft, setTimeLeft] = useState(60);
     const [earnings, setEarnings] = useState(ENTRY_FEE * 0.9); // Start with entry fee minus 10% fee
 
+    // Timer effect
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setTimeLeft(prevTime => {
+                if (prevTime <= 0) {
+                    clearInterval(timer);
+                    return 0;
+                }
+                return prevTime - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, []);
+
     // Calculate earnings based on mass gained
     useEffect(() => {
         // Base earnings is entry fee minus initial fee
@@ -249,8 +264,13 @@ function GameStarter() {
             setIsLoading(true);
             logToTerminal('Processing cash out...');
             
+            // Calculate earnings based on mass
+            const baseEarnings = ENTRY_FEE * 0.9;
+            const massEarnings = (playerMass * 0.00001).toFixed(4);
+            const totalEarnings = parseFloat(massEarnings) + baseEarnings;
+            
             // Calculate prize amount (90% of total earnings)
-            const prizeAmount = parseFloat(earnings) * 0.9;
+            const prizeAmount = totalEarnings * 0.9;
             
             // Convert to lamports (multiply by 1e9 and round to integer)
             const lamports = Math.round(prizeAmount * 1e9);

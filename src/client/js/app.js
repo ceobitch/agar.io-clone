@@ -4,6 +4,20 @@ var ChatClient = require('./chat-client');
 var Canvas = require('./canvas');
 var global = require('./global');
 
+// Firebase Web SDK initialization
+import { initializeApp } from "firebase/app";
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDKwkxjOizg__wVYpm4g6PB-CkWiNKZ6B8",
+  authDomain: "wagar-99c6f.firebaseapp.com",
+  projectId: "wagar-99c6f",
+  storageBucket: "wagar-99c6f.firebasestorage.app",
+  messagingSenderId: "125355537982",
+  appId: "1:125355537982:web:0fef12f7744b613428036f"
+};
+// Initialize Firebase
+const firebaseApp = initializeApp(firebaseConfig);
+
 // No external wallet adapter needed; rely on injected window.solana provider
 
 // Solana wallet integration
