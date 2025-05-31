@@ -51,6 +51,8 @@ module.exports = (isProduction) => ({
             process: ['process/browser'],
         })
     ],
+    // Ignore warnings about missing Firebase
+    ignoreWarnings: [/Failed to parse source map/],
 });
 
 function getRules(isProduction) {

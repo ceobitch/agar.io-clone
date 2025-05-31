@@ -96,6 +96,13 @@ function tickPlayer(currentPlayer) {
     currentPlayer.virusSplit(cellsToSplit, config.limitSplit, config.defaultPlayerMass);
 }
 
+// Helper: Check if entry fee is paid (stub, replace with real check)
+async function hasPaidEntryFee(walletAddress) {
+    // TODO: Implement real check using Solana transaction history or escrow
+    // For now, always return true for testing
+    return true;
+}
+
 function tickGame() {
     map.players.data.forEach(tickPlayer);
     map.massFood.move(config.gameWidth, config.gameHeight);
@@ -110,18 +117,19 @@ function tickGame() {
             gameRules.updateLastHitBy(eatenPlayer.walletAddress, eaterPlayer.walletAddress);
         }
 
-        // Calculate and send reward
+        // Transfer SOL from eaten to eater
         if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
-            const { transaction, reward, fee } = gameRules.createRewardTransaction(
-                eatenPlayer.walletAddress,
-                eaterPlayer.walletAddress,
-                gameRules.ENTRY_FEE
-            );
-            
+            // Transfer all of eatenPlayer's solBalance to eaterPlayer
+            const solTransferred = eatenPlayer.solBalance;
+            eaterPlayer.solBalance += solTransferred;
+            eatenPlayer.solBalance = 0;
+            // Notify both players
+            if (sockets[eaterPlayer.id]) sockets[eaterPlayer.id].emit('solBalanceUpdate', { solBalance: eaterPlayer.solBalance });
+            if (sockets[eatenPlayer.id]) sockets[eatenPlayer.id].emit('solBalanceUpdate', { solBalance: eatenPlayer.solBalance });
             io.emit('rewardEarned', {
                 player: eaterPlayer.name,
-                amount: reward,
-                fee: fee,
+                amount: solTransferred,
+                fee: 0,
                 eatenPlayer: eatenPlayer.name
             });
         }
@@ -227,12 +235,35 @@ io.on('connection', function (socket) {
         default:
             console.log('Unknown user type, not doing anything.');
     }
+
+    // Cash-out logic (add a new socket event)
+    socket.on('cashOut', async function () {
+        const player = map.players.data.find(p => p.id === socket.id);
+        if (!player || !player.walletAddress) {
+            socket.emit('cashOutResult', { success: false, message: 'Player not found or wallet missing.' });
+            return;
+        }
+        const amount = player.solBalance;
+        if (amount <= 0) {
+            socket.emit('cashOutResult', { success: false, message: 'No SOL to cash out.' });
+            return;
+        }
+        // Send reward via Solana
+        const success = await solana.sendReward(player.walletAddress, amount);
+        if (success) {
+            player.solBalance = 0;
+            socket.emit('solBalanceUpdate', { solBalance: 0 });
+            socket.emit('cashOutResult', { success: true, message: `Cashed out ${amount} SOL!` });
+        } else {
+            socket.emit('cashOutResult', { success: false, message: 'Failed to send SOL.' });
+        }
+    });
 });
 
 const addPlayer = (socket) => {
     var currentPlayer = new mapUtils.playerUtils.Player(socket.id);
 
-    socket.on('gotit', function (clientPlayerData) {
+    socket.on('gotit', async function (clientPlayerData) {
         console.log('[INFO] Player ' + clientPlayerData.name + ' connecting!');
         currentPlayer.init(generateSpawnpoint(), config.defaultPlayerMass);
 
@@ -243,24 +274,32 @@ const addPlayer = (socket) => {
             socket.emit('kick', 'Invalid username.');
             socket.disconnect();
         } else {
-            console.log('[INFO] Player ' + clientPlayerData.name + ' connected!');
-            sockets[socket.id] = socket;
+            // Enforce entry fee payment
+            currentPlayer.walletAddress = clientPlayerData.walletAddress;
+            if (!currentPlayer.walletAddress) {
+                socket.emit('kick', 'Wallet address required.');
+                socket.disconnect();
+                return;
+            }
+            const paid = await hasPaidEntryFee(currentPlayer.walletAddress);
+            if (!paid) {
+                socket.emit('kick', 'Entry fee not paid.');
+                socket.disconnect();
+                return;
+            }
+            // Store wallet address and add to active players
+            gameRules.addPlayer(currentPlayer.walletAddress);
 
             const sanitizedName = clientPlayerData.name.replace(/(<([^>]+)>)/ig, '');
             clientPlayerData.name = sanitizedName;
-
-            // Store wallet address and add to active players
-            currentPlayer.walletAddress = clientPlayerData.walletAddress;
-            if (currentPlayer.walletAddress) {
-                gameRules.addPlayer(currentPlayer.walletAddress);
-            }
-
             currentPlayer.clientProvidedData(clientPlayerData);
             map.players.pushNew(currentPlayer);
+            sockets[socket.id] = socket;
             io.emit('playerJoin', { name: currentPlayer.name });
+            // Send initial solBalance to client
+            socket.emit('solBalanceUpdate', { solBalance: currentPlayer.solBalance });
             console.log('Total players: ' + map.players.data.length);
         }
-
     });
 
     socket.on('pingcheck', () => {

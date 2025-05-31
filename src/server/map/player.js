@@ -92,6 +92,7 @@ exports.Player = class {
         this.screenHeight = null;
         this.timeToMerge = null;
         this.setLastHeartbeat();
+        this.solBalance = 0; // Track SOL earned by this player
     }
 
     /* Initalizes things that change with every respawn */
