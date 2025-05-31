@@ -18,8 +18,8 @@ function getWebpackConfig() {
 function runServer(done) {
     nodemon({
         delay: 10,
-        script: './bin/server/server.js',
-        ignore: ['bin/'],
+        script: './public/server/server.js',
+        ignore: ['public/'],
         ext: 'js html css',
         done,
         tasks: [process.env.IS_DEV ? 'dev' : 'build']
@@ -31,18 +31,18 @@ function buildServer() {
     if (!process.env.IS_DEV) {
         task = task.pipe(babel())
     }
-    return task.pipe(gulp.dest('bin/server/'));
+    return task.pipe(gulp.dest('public/server/'));
 }
 
 function copyClientResources() {
     return gulp.src(['src/client/**/*.*', '!src/client/**/*.js'])
-        .pipe(gulp.dest('./bin/client/'));
+        .pipe(gulp.dest('./public/'));
 }
 
 function buildClientJS() {
     return gulp.src(['src/client/js/app.js'])
         .pipe(webpack(getWebpackConfig()))
-        .pipe(gulp.dest('bin/client/js/'));
+        .pipe(gulp.dest('public/js/'));
 }
 
 function setDev(done) {
@@ -62,7 +62,7 @@ function mocha(done) {
 }
 
 gulp.task('lint', () => {
-    return gulp.src(['**/*.js', '!node_modules/**/*.js', '!bin/**/*.js'])
+    return gulp.src(['**/*.js', '!node_modules/**/*.js', '!public/**/*.js'])
         .pipe(eslint())
         .pipe(eslint.format())
         .pipe(eslint.failAfterError())
