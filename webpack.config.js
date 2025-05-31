@@ -7,21 +7,17 @@ module.exports = (isProduction) => ({
         library: "app",
         filename: "app.js"
     },
-    devtool: isProduction ? false : 'source-map',
+    devtool: false,
     module: {
         rules: [
+            ...getRules(isProduction),
             {
                 test: /\.jsx?$/,
                 exclude: /node_modules/,
                 use: {
                     loader: 'babel-loader',
                     options: {
-                        presets: [
-                            '@babel/preset-env',
-                            ['@babel/preset-react', {
-                                runtime: 'automatic'
-                            }]
-                        ]
+                        presets: ['@babel/preset-react']
                     }
                 }
             },
@@ -53,9 +49,26 @@ module.exports = (isProduction) => ({
         new webpack.ProvidePlugin({
             Buffer: ['buffer', 'Buffer'],
             process: ['process/browser'],
-        }),
-        new webpack.DefinePlugin({
-            'process.env.NODE_ENV': JSON.stringify(isProduction ? 'production' : 'development')
         })
-    ]
+    ],
 });
+
+function getRules(isProduction) {
+    if (isProduction) {
+        return [
+            {
+                test: /\.(?:js|mjs|cjs)$/,
+                exclude: /node_modules/,
+                use: {
+                    loader: 'babel-loader',
+                    options: {
+                        presets: [
+                            ['@babel/preset-env', { targets: "defaults" }]
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+    return [];
+}

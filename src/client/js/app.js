@@ -140,14 +140,12 @@ window.onload = function () {
 
     if (settingsMenu && settingsPanel) {
         settingsMenu.onclick = function () {
-            const currentHeight = settingsPanel.style.maxHeight;
-            settingsPanel.style.maxHeight = currentHeight === '300px' ? '0px' : '300px';
+            if (settingsPanel.style.maxHeight == '300px') {
+                settingsPanel.style.maxHeight = '0px';
+            } else {
+                settingsPanel.style.maxHeight = '300px';
+            }
         };
-    }
-
-    // Initialize settings panel height
-    if (settingsPanel) {
-        settingsPanel.style.maxHeight = '0px';
     }
 
     // No keypress listener needed; player names come from wallet.
