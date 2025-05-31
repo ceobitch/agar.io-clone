@@ -4,8 +4,20 @@
 const express = require('express');
 const app = express();
 const http = require('http').Server(app);
-const io = require('socket.io')(http);
+const io = require('socket.io')(http, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    },
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    upgradeTimeout: 30000,
+    allowUpgrades: true,
+    perMessageDeflate: false
+});
 const SAT = require('sat');
+const solana = require('./solana');
 
 const gameLogic = require('./game-logic');
 const loggingRepositry = require('./repositories/logging-repository');
@@ -14,6 +26,8 @@ const config = require('../../config');
 const util = require('./lib/util');
 const mapUtils = require('./map/map');
 const {getPosition} = require("./lib/entityUtils");
+const gameRules = require('./game-rules');
+const { GAME_WALLET_PUBLIC_KEY } = require('./solana');
 
 let map = new mapUtils.Map(config);
 
@@ -69,6 +83,12 @@ const addPlayer = (socket) => {
             const sanitizedName = clientPlayerData.name.replace(/(<([^>]+)>)/ig, '');
             clientPlayerData.name = sanitizedName;
 
+            // Store wallet address and add to active players
+            currentPlayer.walletAddress = clientPlayerData.walletAddress;
+            if (currentPlayer.walletAddress) {
+                gameRules.addPlayer(currentPlayer.walletAddress);
+            }
+
             currentPlayer.clientProvidedData(clientPlayerData);
             map.players.pushNew(currentPlayer);
             io.emit('playerJoin', { name: currentPlayer.name });
@@ -96,8 +116,13 @@ const addPlayer = (socket) => {
     });
 
     socket.on('disconnect', () => {
-        map.players.removePlayerByID(currentPlayer.id);
-        console.log('[INFO] User ' + currentPlayer.name + ' has disconnected');
+        if (currentPlayer.walletAddress) {
+            // Just log the disconnect, don't remove the player
+            console.log('[INFO] User ' + currentPlayer.name + ' disconnected but staying in game');
+        }
+        
+        // Don't remove player from map
+        console.log('[INFO] User ' + currentPlayer.name + ' has disconnected but remains in game');
         socket.broadcast.emit('playerDisconnect', { name: currentPlayer.name });
     });
 
@@ -212,11 +237,7 @@ const addSpectator = (socket) => {
 }
 
 const tickPlayer = (currentPlayer) => {
-    if (currentPlayer.lastHeartbeat < new Date().getTime() - config.maxHeartbeatInterval) {
-        sockets[currentPlayer.id].emit('kick', 'Last heartbeat received over ' + config.maxHeartbeatInterval + ' ago.');
-        sockets[currentPlayer.id].disconnect();
-    }
-
+    // Remove inactivity check - players stay in game
     currentPlayer.move(config.slowBase, config.gameWidth, config.gameHeight, INIT_MASS_LOG);
 
     const isEntityInsideCircle = (point, circle) => {
@@ -230,7 +251,6 @@ const tickPlayer = (currentPlayer) => {
             if (cell.mass > mass.mass * 1.1)
                 return true;
         }
-
         return false;
     };
 
@@ -241,7 +261,6 @@ const tickPlayer = (currentPlayer) => {
     const cellsToSplit = [];
     for (let cellIndex = 0; cellIndex < currentPlayer.cells.length; cellIndex++) {
         const currentCell = currentPlayer.cells[cellIndex];
-
         const cellCircle = currentCell.toCircle();
 
         const eatenFoodIndexes = util.getIndexes(map.food.data, food => isEntityInsideCircle(food, cellCircle));
@@ -267,32 +286,63 @@ const tickGame = () => {
     map.players.data.forEach(tickPlayer);
     map.massFood.move(config.gameWidth, config.gameHeight);
 
-    map.players.handleCollisions(function (gotEaten, eater) {
+    map.players.handleCollisions(async function (gotEaten, eater) {
         const cellGotEaten = map.players.getCell(gotEaten.playerIndex, gotEaten.cellIndex);
+        const eaterPlayer = map.players.data[eater.playerIndex];
+        const eatenPlayer = map.players.data[gotEaten.playerIndex];
 
-        map.players.data[eater.playerIndex].changeCellMass(eater.cellIndex, cellGotEaten.mass);
+        // Update last hit by
+        if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
+            gameRules.updateLastHitBy(eatenPlayer.walletAddress, eaterPlayer.walletAddress);
+        }
+
+        // Calculate and send reward
+        if (eatenPlayer.walletAddress && eaterPlayer.walletAddress) {
+            const { transaction, reward, fee } = gameRules.createRewardTransaction(
+                eatenPlayer.walletAddress,
+                eaterPlayer.walletAddress,
+                gameRules.ENTRY_FEE
+            );
+            
+            io.emit('rewardEarned', {
+                player: eaterPlayer.name,
+                amount: reward,
+                fee: fee,
+                eatenPlayer: eatenPlayer.name
+            });
+        }
+
+        eaterPlayer.changeCellMass(eater.cellIndex, cellGotEaten.mass);
 
         const playerDied = map.players.removeCell(gotEaten.playerIndex, gotEaten.cellIndex);
         if (playerDied) {
-            let playerGotEaten = map.players.data[gotEaten.playerIndex];
-            io.emit('playerDied', { name: playerGotEaten.name }); //TODO: on client it is `playerEatenName` instead of `name`
-            sockets[playerGotEaten.id].emit('RIP');
+            if (eatenPlayer.walletAddress) {
+                gameRules.removePlayer(eatenPlayer.walletAddress);
+            }
+            io.emit('playerDied', { name: eatenPlayer.name });
+            sockets[eatenPlayer.id].emit('RIP');
             map.players.removePlayerByIndex(gotEaten.playerIndex);
         }
     });
-
 };
 
 const calculateLeaderboard = () => {
     const topPlayers = map.players.getTopPlayers();
 
-    if (leaderboard.length !== topPlayers.length) {
-        leaderboard = topPlayers;
+    // Add wallet address and valuation to each player
+    const enrichedPlayers = topPlayers.map(player => ({
+        ...player,
+        walletAddress: player.walletAddress || '',
+        valuation: player.massTotal * gameRules.ENTRY_FEE / config.defaultPlayerMass // Calculate valuation based on mass
+    }));
+
+    if (leaderboard.length !== enrichedPlayers.length) {
+        leaderboard = enrichedPlayers;
         leaderboardChanged = true;
     } else {
         for (let i = 0; i < leaderboard.length; i++) {
-            if (leaderboard[i].id !== topPlayers[i].id) {
-                leaderboard = topPlayers;
+            if (leaderboard[i].id !== enrichedPlayers[i].id) {
+                leaderboard = enrichedPlayers;
                 leaderboardChanged = true;
                 break;
             }
@@ -351,3 +401,11 @@ setInterval(sendUpdates, 1000 / config.networkUpdateFactor);
 var ipaddress = process.env.OPENSHIFT_NODEJS_IP || process.env.IP || config.host;
 var serverport = process.env.OPENSHIFT_NODEJS_PORT || process.env.PORT || config.port;
 http.listen(serverport, ipaddress, () => console.log('[DEBUG] Listening on ' + ipaddress + ':' + serverport));
+
+// Add API endpoint for game wallet
+app.get('/api/game-wallet', (req, res) => {
+    if (!GAME_WALLET_PUBLIC_KEY) {
+        return res.status(500).json({ error: 'Game wallet not initialized' });
+    }
+    res.json({ publicKey: GAME_WALLET_PUBLIC_KEY });
+});

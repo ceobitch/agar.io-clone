@@ -3,7 +3,7 @@
 <head>
     <!-- Meta Properties -->
     <meta charset="UTF-8">
-    <title>Open Agar</title>
+    <title>Wagar</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
     <!-- CSS -->
     <link rel="stylesheet" href="css/main.css" />
@@ -26,11 +26,11 @@
     </div>
     <div id="startMenuWrapper">
         <div id="startMenu">
-            <p>Open Agar</p>
-            <input type="text" tabindex="0" autofocus placeholder="Enter your name here" id="playerNameInput" maxlength="25" />
-            <b class="input-error">Nick must be alphanumeric characters only!</b>
+            <p>Wagar</p>
+            <!-- The player's name will be set automatically from their wallet address. -->
             <br />
-            <a onclick="document.getElementById('spawn_cell').play();"><button id="startButton">Play</button></a>
+            <!-- React wallet button will render inside #wallet-root -->
+            <div id="wallet-root"></div>
             <button id="spectateButton">Spectate</button>
             <button id="settingsButton">Settings</button>
             <br />
@@ -40,19 +40,28 @@
                     <label><input id="visBord" type="checkbox">Show border</label>
                     <label><input id="showMass" type="checkbox">Show mass</label>
                     <br />
-                    <label><input id="continuity" type="checkbox">Continue moving when mouse is off-screen</label>
+                    <label><input id="continuity" type="checkbox" checked>Continue moving when mouse is off-screen</label>
                     <br />
                     <label><input id="roundFood" type="checkbox" checked>Rounded food</label>
                     <label><input id="darkMode" type="checkbox">Toggle Dark Mode</label>
                 </ul>
             </div>
             <div id="instructions">
-                <h3>Gameplay</h3>
+                <h3>⚠️ Experimental Game - Play at Your Own Risk ⚠️</h3>
                 <ul>
-                    <li>Move your mouse on the screen to move your character.</li>
-                    <li>Eat food and other players in order to grow your character (food respawns every time a player eats it).</li>
-                    <li>A player's mass is the number of food particles eaten.</li>
-                    <li>Objective: Try to get fat and eat other players.</li>
+                    <li><strong>Entry Fee:</strong> 0.1 SOL per game</li>
+                    <li><strong>Rewards:</strong> The more players you eat, the more SOL you win!</li>
+                    <li><strong>Risk Warning:</strong> You can lose your entry fee if you get eaten</li>
+                    <li><strong>How to Play:</strong>
+                        <ul>
+                            <li>Connect your Solana wallet to start</li>
+                            <li>Move your mouse to control your cell</li>
+                            <li>Eat smaller cells and food to grow</li>
+                            <li>Split (Space) to catch faster players</li>
+                            <li>Eject mass (W) to feed other cells</li>
+                        </ul>
+                    </li>
+                    <li><strong>Beta Version:</strong> This is an experimental game. Bugs may occur.</li>
                 </ul>
             </div>
         </div>

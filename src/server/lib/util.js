@@ -5,6 +5,11 @@
 const cfg = require('../../../config');
 
 exports.validNick = function (nickname) {
+    // Allow wallet addresses (which may contain dots and ellipsis)
+    if (nickname.includes('…')) {
+        return true;
+    }
+    // Allow regular usernames
     var regex = /^\w*$/;
     return regex.exec(nickname) !== null;
 };

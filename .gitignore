@@ -1,5 +1,29 @@
-node_modules
-npm-debug.log
-.idea
+# Environment variables
+.env
+.env.*
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
 client/bower_components
 bin

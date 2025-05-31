@@ -4,8 +4,35 @@ var ChatClient = require('./chat-client');
 var Canvas = require('./canvas');
 var global = require('./global');
 
-var playerNameInput = document.getElementById('playerNameInput');
-var socket;
+// No external wallet adapter needed; rely on injected window.solana provider
+
+// Solana wallet integration
+let socket;
+
+// Abbreviate a Solana public key to e.g. ABCD…WXYZ
+function abbreviateAddress(address) {
+    if (!address || address.length < 8) return address;
+    return address.slice(0, 4) + '…' + address.slice(-4);
+}
+
+// Prompt the user to connect their wallet and return the public key (string).
+async function connectWallet() {
+    try {
+        // 1. Use any injected provider (Phantom, Backpack, Solflare, etc.) via the standard API.
+        if (window.solana && typeof window.solana.connect === 'function') {
+            // Force the popup even if the site was previously connected.
+            const resp = await window.solana.connect({ onlyIfTrusted: false });
+            if (resp && resp.publicKey) {
+                return resp.publicKey.toString();
+            }
+        }
+
+        alert('No Solana wallet extension found — please install a wallet such as Phantom to play.');
+    } catch (err) {
+        console.error('Wallet connection failed', err);
+    }
+    return null;
+}
 
 var debug = function (args) {
     if (console && console.log) {
@@ -13,12 +40,40 @@ var debug = function (args) {
     }
 };
 
+// Safari polyfills and fixes
+if (/^((?!chrome|android).)*safari/i.test(navigator.userAgent)) {
+    // Fix for Safari's handling of WebSocket
+    if (!window.WebSocket.prototype.send) {
+        window.WebSocket.prototype.send = function(data) {
+            if (this.readyState === WebSocket.OPEN) {
+                this.dispatchEvent(new MessageEvent('message', { data: data }));
+            }
+        };
+    }
+
+    // Fix for Safari's handling of requestAnimationFrame
+    if (!window.requestAnimationFrame) {
+        window.requestAnimationFrame = function(callback) {
+            return setTimeout(callback, 1000 / 60);
+        };
+    }
+    if (!window.cancelAnimationFrame) {
+        window.cancelAnimationFrame = function(id) {
+            clearTimeout(id);
+        };
+    }
+}
+
+// Mobile detection
 if (/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)) {
     global.mobile = true;
 }
 
-function startGame(type) {
-    global.playerName = playerNameInput.value.replace(/(<([^>]+)>)/ig, '').substring(0, 25);
+function startGame(type, name, walletAddress) {
+    if (type === 'player') {
+        global.playerName = name;
+        global.walletAddress = walletAddress;
+    }
     global.playerType = type;
 
     global.screen.width = window.innerWidth;
@@ -27,7 +82,15 @@ function startGame(type) {
     document.getElementById('startMenuWrapper').style.maxHeight = '0px';
     document.getElementById('gameAreaWrapper').style.opacity = 1;
     if (!socket) {
-        socket = io({ query: "type=" + type });
+        socket = io({
+            query: "type=" + type,
+            transports: ['websocket', 'polling'],
+            upgrade: true,
+            rememberUpgrade: true,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
         setupSocket(socket);
     }
     if (!global.animLoopHandle)
@@ -39,57 +102,53 @@ function startGame(type) {
     global.socket = socket;
 }
 
-// Checks if the nick chosen contains valid alphanumeric characters (and underscores).
-function validNick() {
-    var regex = /^\w*$/;
-    debug('Regex Test', regex.exec(playerNameInput.value));
-    return regex.exec(playerNameInput.value) !== null;
-}
+// Nickname validation is no longer required as the name is derived from the wallet.
 
 window.onload = function () {
+    const btn = document.getElementById('startButton');
+    const btnS = document.getElementById('spectateButton');
+    const settingsMenu = document.getElementById('settingsButton');
+    const settingsPanel = document.getElementById('settings');
 
-    var btn = document.getElementById('startButton'),
-        btnS = document.getElementById('spectateButton'),
-        nickErrorText = document.querySelector('#startMenu .input-error');
+    if (btnS) {
+        btnS.onclick = function () {
+            startGame('spectator', 'Spectator', '');
+        };
+    }
 
-    btnS.onclick = function () {
-        startGame('spectator');
-    };
-
-    btn.onclick = function () {
-
-        // Checks if the nick is valid.
-        if (validNick()) {
-            nickErrorText.style.opacity = 0;
-            startGame('player');
-        } else {
-            nickErrorText.style.opacity = 1;
-        }
-    };
-
-    var settingsMenu = document.getElementById('settingsButton');
-    var settings = document.getElementById('settings');
-
-    settingsMenu.onclick = function () {
-        if (settings.style.maxHeight == '300px') {
-            settings.style.maxHeight = '0px';
-        } else {
-            settings.style.maxHeight = '300px';
-        }
-    };
-
-    playerNameInput.addEventListener('keypress', function (e) {
-        var key = e.which || e.keyCode;
-
-        if (key === global.KEY_ENTER) {
-            if (validNick()) {
-                nickErrorText.style.opacity = 0;
-                startGame('player');
-            } else {
-                nickErrorText.style.opacity = 1;
+    if (btn) {
+        btn.onclick = async function () {
+            if (!window.solana) {
+                alert('No Solana wallet provider was found in this browser. Install Phantom or another Solana wallet extension and refresh.');
+                return;
             }
-        }
-    });
+
+            try {
+                // Try to connect to any available wallet
+                const resp = await window.solana.connect({ onlyIfTrusted: false });
+                if (resp && resp.publicKey) {
+                    const pubKey = resp.publicKey.toString();
+                    const name = abbreviateAddress(pubKey);
+                    startGame('player', name, pubKey);
+                }
+            } catch (err) {
+                console.error('Wallet connection failed:', err);
+                alert('Failed to connect wallet. Please try again.');
+            }
+        };
+    }
+
+    if (settingsMenu && settingsPanel) {
+        settingsMenu.onclick = function () {
+            if (settingsPanel.style.maxHeight == '300px') {
+                settingsPanel.style.maxHeight = '0px';
+            } else {
+                settingsPanel.style.maxHeight = '300px';
+            }
+        };
+    }
+
+    // No keypress listener needed; player names come from wallet.
 };
 
 // TODO: Break out into GameControls.
@@ -124,16 +183,16 @@ window.canvas = new Canvas();
 window.chat = new ChatClient();
 
 var visibleBorderSetting = document.getElementById('visBord');
-visibleBorderSetting.onchange = settings.toggleBorder;
+visibleBorderSetting.onchange = function() { window.chat.toggleBorder(); };
 
 var showMassSetting = document.getElementById('showMass');
-showMassSetting.onchange = settings.toggleMass;
+showMassSetting.onchange = function() { window.chat.toggleMass(); };
 
 var continuitySetting = document.getElementById('continuity');
-continuitySetting.onchange = settings.toggleContinuity;
+continuitySetting.onchange = function() { window.chat.toggleContinuity(); };
 
 var roundFoodSetting = document.getElementById('roundFood');
-roundFoodSetting.onchange = settings.toggleRoundFood;
+roundFoodSetting.onchange = function() { window.chat.toggleRoundFood(); };
 
 var c = window.canvas.cv;
 var graph = c.getContext('2d');
@@ -192,8 +251,6 @@ function setupSocket(socket) {
 
     socket.on('playerDied', (data) => {
         const player = isUnnamedCell(data.playerEatenName) ? 'An unnamed cell' : data.playerEatenName;
-        //const killer = isUnnamedCell(data.playerWhoAtePlayerName) ? 'An unnamed cell' : data.playerWhoAtePlayerName;
-
         //window.chat.addSystemLine('{GAME} - <b>' + (player) + '</b> was eaten by <b>' + (killer) + '</b>');
         window.chat.addSystemLine('{GAME} - <b>' + (player) + '</b> was eaten');
     });
@@ -211,19 +268,16 @@ function setupSocket(socket) {
         var status = '<span class="title">Leaderboard</span>';
         for (var i = 0; i < leaderboard.length; i++) {
             status += '<br />';
+            const playerName = leaderboard[i].name.length !== 0 ? leaderboard[i].name : 'An unnamed cell';
+            const walletAddress = leaderboard[i].walletAddress ? abbreviateAddress(leaderboard[i].walletAddress) : '';
+            const valuation = leaderboard[i].valuation ? ` (${leaderboard[i].valuation.toFixed(3)} SOL)` : '';
+            
             if (leaderboard[i].id == player.id) {
-                if (leaderboard[i].name.length !== 0)
-                    status += '<span class="me">' + (i + 1) + '. ' + leaderboard[i].name + "</span>";
-                else
-                    status += '<span class="me">' + (i + 1) + ". An unnamed cell</span>";
+                status += `<span class="me">${i + 1}. ${playerName}${walletAddress ? ' (' + walletAddress + ')' : ''}${valuation}</span>`;
             } else {
-                if (leaderboard[i].name.length !== 0)
-                    status += (i + 1) + '. ' + leaderboard[i].name;
-                else
-                    status += (i + 1) + '. An unnamed cell';
+                status += `${i + 1}. ${playerName}${walletAddress ? ' (' + walletAddress + ')' : ''}${valuation}`;
             }
         }
-        //status += '<br />Players: ' + data.players;
         document.getElementById('status').innerHTML = status;
     });
 
@@ -275,6 +329,37 @@ function setupSocket(socket) {
             render.drawErrorMessage('You were kicked!', graph, global.screen);
         }
         socket.close();
+    });
+
+    socket.on('rewardEarned', (data) => {
+        const rewardMessage = `{REWARD} - <b>${data.player}</b> earned ${data.amount.toFixed(3)} SOL for eating <b>${data.eatenPlayer}</b>! (Fee: ${data.fee.toFixed(3)} SOL)`;
+        window.chat.addSystemLine(rewardMessage);
+        
+        // Show a floating notification
+        const notification = document.createElement('div');
+        notification.className = 'reward-notification';
+        notification.innerHTML = `+${data.amount.toFixed(3)} SOL`;
+        notification.style.position = 'absolute';
+        notification.style.left = '50%';
+        notification.style.top = '50%';
+        notification.style.transform = 'translate(-50%, -50%)';
+        notification.style.color = '#4CAF50';
+        notification.style.fontSize = '24px';
+        notification.style.fontWeight = 'bold';
+        notification.style.textShadow = '0 0 10px rgba(76, 175, 80, 0.5)';
+        notification.style.animation = 'fadeOut 2s forwards';
+        
+        document.getElementById('gameAreaWrapper').appendChild(notification);
+        
+        // Remove notification after animation
+        setTimeout(() => {
+            notification.remove();
+        }, 2000);
+    });
+
+    socket.on('rageQuitPayout', (data) => {
+        const message = `{RAGE QUIT} - <b>${data.from}</b> quit early! Their ${gameRules.ENTRY_FEE} SOL was sent to <b>${data.to}</b>`;
+        window.chat.addSystemLine(message);
     });
 }
 
@@ -377,3 +462,20 @@ function resize() {
 
     socket.emit('windowResized', { screenWidth: global.screen.width, screenHeight: global.screen.height });
 }
+
+// Expose for React wallet component
+window.startGame = startGame;
+
+// Import React wallet UI (compiled by webpack)
+require('./wallet-root.jsx');
+
+// Add CSS for reward notification animation
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes fadeOut {
+        0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); }
+    }
+`;
+document.head.appendChild(style);
+
