@@ -8,6 +8,8 @@ var global = require('./global');
 
 // Solana wallet integration
 let socket;
+let solBalance = 0;
+let solBalanceReady = false;
 
 // Abbreviate a Solana public key to e.g. ABCD…WXYZ
 function abbreviateAddress(address) {
@@ -69,6 +71,46 @@ if (/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)) {
     global.mobile = true;
 }
 
+// Add UI for SOL balance and cash-out
+window.addEventListener('DOMContentLoaded', () => {
+    const solDiv = document.createElement('div');
+    solDiv.id = 'sol-balance';
+    solDiv.style.position = 'fixed';
+    solDiv.style.top = '10px';
+    solDiv.style.right = '10px';
+    solDiv.style.background = 'rgba(0,0,0,0.7)';
+    solDiv.style.color = '#fff';
+    solDiv.style.padding = '8px 16px';
+    solDiv.style.borderRadius = '8px';
+    solDiv.style.zIndex = 1000;
+    solDiv.innerHTML = 'SOL: 0';
+    document.body.appendChild(solDiv);
+
+    const cashOutBtn = document.createElement('button');
+    cashOutBtn.id = 'cash-out-btn';
+    cashOutBtn.innerText = 'Cash Out';
+    cashOutBtn.style.marginLeft = '10px';
+    cashOutBtn.disabled = true;
+    solDiv.appendChild(cashOutBtn);
+
+    cashOutBtn.onclick = () => {
+        if (socket) {
+            cashOutBtn.disabled = true;
+            socket.emit('cashOut');
+        }
+    };
+});
+
+function updateSolBalanceUI(balance) {
+    solBalance = balance;
+    const solDiv = document.getElementById('sol-balance');
+    if (solDiv) {
+        solDiv.innerHTML = `SOL: ${balance.toFixed(4)}`;
+        const cashOutBtn = document.getElementById('cash-out-btn');
+        if (cashOutBtn) cashOutBtn.disabled = balance <= 0;
+    }
+}
+
 function startGame(type, name, walletAddress) {
     if (type === 'player') {
         global.playerName = name;
@@ -117,18 +159,22 @@ window.onload = function () {
     }
 
     if (btn) {
+        btn.disabled = true; // Wait for entry fee confirmation
         btn.onclick = async function () {
             if (!window.solana) {
                 alert('No Solana wallet provider was found in this browser. Install Phantom or another Solana wallet extension and refresh.');
                 return;
             }
-
             try {
-                // Try to connect to any available wallet
                 const resp = await window.solana.connect({ onlyIfTrusted: false });
                 if (resp && resp.publicKey) {
                     const pubKey = resp.publicKey.toString();
                     const name = abbreviateAddress(pubKey);
+                    // Only allow start if entry fee confirmed
+                    if (!solBalanceReady) {
+                        alert('Waiting for entry fee confirmation...');
+                        return;
+                    }
                     startGame('player', name, pubKey);
                 }
             } catch (err) {
@@ -319,16 +365,25 @@ function setupSocket(socket) {
         }, 2500);
     });
 
-    socket.on('kick', function (reason) {
-        global.gameStart = false;
-        global.kicked = true;
-        if (reason !== '') {
-            render.drawErrorMessage('You were kicked for: ' + reason, graph, global.screen);
+    socket.on('solBalanceUpdate', ({ solBalance: balance }) => {
+        updateSolBalanceUI(balance);
+        solBalanceReady = true;
+        // Enable start button if waiting for entry fee
+        const btn = document.getElementById('startButton');
+        if (btn) btn.disabled = false;
+    });
+
+    socket.on('cashOutResult', ({ success, message }) => {
+        alert(message);
+        if (!success) {
+            const cashOutBtn = document.getElementById('cash-out-btn');
+            if (cashOutBtn) cashOutBtn.disabled = false;
         }
-        else {
-            render.drawErrorMessage('You were kicked!', graph, global.screen);
-        }
-        socket.close();
+    });
+
+    socket.on('kick', (msg) => {
+        alert(msg);
+        window.location.reload();
     });
 
     socket.on('rewardEarned', (data) => {
