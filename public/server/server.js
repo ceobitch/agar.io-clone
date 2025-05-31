@@ -18,6 +18,7 @@ const io = require('socket.io')(http, {
 });
 const SAT = require('sat');
 const solana = require('./solana');
+const path = require('path');
 const gameLogic = require('./game-logic');
 const loggingRepositry = require('./repositories/logging-repository');
 const chatRepository = require('./repositories/chat-repository');
@@ -31,6 +32,8 @@ const gameRules = require('./game-rules');
 const {
   GAME_WALLET_PUBLIC_KEY
 } = require('./solana');
+
+// Initialize game state
 let map = new mapUtils.Map(config);
 let sockets = {};
 let spectators = [];
@@ -38,7 +41,17 @@ const INIT_MASS_LOG = util.mathLog(config.defaultPlayerMass, config.slowBase);
 let leaderboard = [];
 let leaderboardChanged = false;
 const Vector = SAT.Vector;
-app.use(express.static(__dirname + '/../client'));
+
+// Serve static files
+app.use(express.static(path.join(__dirname, '../../public')));
+app.use(express.static(path.join(__dirname, '../client')));
+
+// Initialize game loops
+setInterval(tickGame, 1000 / 60);
+setInterval(gameloop, 1000);
+setInterval(sendUpdates, 1000 / config.networkUpdateFactor);
+
+// Socket.io connection handler
 io.on('connection', function (socket) {
   let type = socket.handshake.query.type;
   console.log('User has connected: ', type);
@@ -345,16 +358,8 @@ const updateSpectator = socketID => {
     sendLeaderboard(sockets[socketID]);
   }
 };
-setInterval(tickGame, 1000 / 60);
-setInterval(gameloop, 1000);
-setInterval(sendUpdates, 1000 / config.networkUpdateFactor);
 
-// Don't touch, IP configurations.
-var ipaddress = process.env.OPENSHIFT_NODEJS_IP || process.env.IP || config.host;
-var serverport = process.env.OPENSHIFT_NODEJS_PORT || process.env.PORT || config.port;
-http.listen(serverport, ipaddress, () => console.log('[DEBUG] Listening on ' + ipaddress + ':' + serverport));
-
-// Add API endpoint for game wallet
+// API endpoints
 app.get('/api/game-wallet', (req, res) => {
   if (!GAME_WALLET_PUBLIC_KEY) {
     return res.status(500).json({
@@ -365,3 +370,20 @@ app.get('/api/game-wallet', (req, res) => {
     publicKey: GAME_WALLET_PUBLIC_KEY
   });
 });
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok'
+  });
+});
+
+// Start server only if not in serverless environment
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const ipaddress = process.env.OPENSHIFT_NODEJS_IP || process.env.IP || config.host;
+  const serverport = process.env.OPENSHIFT_NODEJS_PORT || process.env.PORT || config.port;
+  http.listen(serverport, ipaddress, () => console.log('[DEBUG] Listening on ' + ipaddress + ':' + serverport));
+}
+
+// Export for serverless
+module.exports = app;

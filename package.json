@@ -10,6 +10,9 @@
     "test": "gulp test",
     "vercel-build": "npm run build"
   },
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/owenashurst/agar.io-clone.git"
