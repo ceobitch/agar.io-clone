@@ -12,7 +12,7 @@ COPY package*.json ./
 RUN rm -rf node_modules package-lock.json
 
 # Install dependencies
-RUN npm install --production
+RUN npm ci
 
 # Copy the rest of your code
 COPY . .
