@@ -1,15 +1,25 @@
-FROM node:14-alpine
+FROM node:18
 
-RUN mkdir -p /usr/src/app
-WORKDIR /usr/src/app
+WORKDIR /app
 
-COPY package.json /usr/src/app/
-RUN npm install && npm cache clean --force
-COPY . /usr/src/app
+# Install build tools for native modules
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-CMD [ "npm", "start" ]
+# Copy only package files first for better caching
+COPY package*.json ./
+
+# Clean up any old lockfiles and node_modules
+RUN rm -rf node_modules package-lock.json
+
+# Install dependencies
+RUN npm install --production
+
+# Copy the rest of your code
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
 
 HEALTHCHECK  --interval=5m --timeout=3s \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
-
-EXPOSE 3000
