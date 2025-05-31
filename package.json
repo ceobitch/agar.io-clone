@@ -89,6 +89,9 @@
     "@types/sat": "^0.0.32",
     "css-loader": "^7.1.2",
     "plugin-error": "^2.0.1",
-    "style-loader": "^4.0.0"
+    "style-loader": "^4.0.0",
+    "typescript": "^5.3.3",
+    "bs58": "^4.0.1",
+    "fastestsmallesttextencoderdecoder": "^1.0.22"
   }
 }
